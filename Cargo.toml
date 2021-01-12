@@ -1,8 +1,15 @@
 [package]
-name = "mel_filter"
-version = "0.1.0"
+name = "mel-filter"
+version = "0.1.1"
 authors = ["Wonway Song <sww4718168@163.com>"]
 edition = "2018"
+description = "Mel bank filter, Same as `librosa.filters.mel`."
+documentation = "https://docs.rs/mel-filter"
+repository = "https://github.com/songww/mel-filter"
+homepage = "https://github.com/songww/mel-filter"
+license = "MIT"
+keywords = ["mel", "mel_filter", "mel_bank_filter", "librosa"]
+categories = ["multimedia::audio", "science"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
