@@ -16,3 +16,7 @@ categories = ["multimedia::audio", "science"]
 [dependencies]
 num-traits = "0.2"
 itertools-num = "0.1"
+ndarray = { version = "0.14", optional = true }
+
+[features]
+default = []

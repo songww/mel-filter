@@ -1,5 +1,5 @@
 use itertools_num::linspace;
-use num_traits::{AsPrimitive, Float, NumCast, NumOps};
+use num_traits::{AsPrimitive, Float, NumCast, NumOps, Zero};
 
 pub enum NormalizationFactor {
     /// Leave all the triangles aiming for a peak value of 1.0
@@ -43,7 +43,7 @@ pub trait Hz: Float + NumCast {
 impl Hz for f32 {}
 impl Hz for f64 {}
 
-pub trait Mel: Float + NumCast {
+pub trait Mel: Float + NumCast + Zero + Clone {
     ///
     /// # Examples
     ///
@@ -84,6 +84,84 @@ pub trait Mel: Float + NumCast {
 
 impl Mel for f32 {}
 impl Mel for f64 {}
+
+pub trait FilterBank<Mel> {
+    fn as_slice(&self) -> &[Mel];
+    fn as_mut_slice(&mut self) -> &mut [Mel];
+    fn shape(&self) -> &[usize];
+    fn zeros(shape: &[usize; 2]) -> Self;
+    fn row_mut(&mut self, idx: usize) -> &mut [Mel];
+}
+
+#[cfg(feature = "ndarray")]
+use ndarray::prelude::*;
+#[cfg(feature = "ndarray")]
+impl<Mel> FilterBank<Mel> for Array2<Mel> {
+    #[inline]
+    fn as_slice(&self) -> &[Mel] {
+        self.as_slice().unwrap()
+    }
+    #[inline]
+    fn as_mut_slice(&mut self) -> &mut [Mel] {
+        self.as_mut_slice().unwrap()
+    }
+    #[inline]
+    fn shape(&self) -> &[usize] {
+        self.shape()
+    }
+
+    #[inline]
+    fn zeros(shape: &[usize; 2]) -> Self {
+        Self::zeros(shape)
+    }
+
+    #[inline]
+    fn row_mut(&mut self, idx: usize) -> &mut [Mel]{
+        Arrray2::<Mel>::row_mut(self, idx).as_mut_slice().unwrap()
+    }
+}
+
+pub struct FilterBankMat<Mel> {
+    data: Vec<Mel>,
+    cols: usize,
+    rows: usize,
+    shape_: [usize; 2],
+}
+
+impl<Mel: Clone + Zero> FilterBank<Mel> for FilterBankMat<Mel> {
+    #[inline]
+    fn as_slice(&self) -> &[Mel] {
+        self.data.as_slice()
+    }
+    #[inline]
+    fn as_mut_slice(&mut self) -> &mut [Mel] {
+        self.data.as_mut_slice()
+    }
+    #[inline]
+    fn shape(&self) -> &[usize] {
+        &self.shape_
+    }
+
+    #[inline]
+    fn row_mut(&mut self, idx: usize) -> &mut [Mel] {
+        assert!(idx <= self.rows);
+        let from = idx * self.cols;
+        let to = idx * self.cols + self.cols;
+        &mut self.data[from..to]
+    }
+
+    #[inline]
+    fn zeros(shape: &[usize; 2]) -> Self {
+        let rows = shape[0];
+        let cols = shape[1];
+        Self {
+            data: vec![Mel::zero(); rows * cols],
+            rows,
+            cols,
+            shape_: [rows, cols]
+        }
+    }
+}
 
 /// Implementation of `librosa.hz_to_mel`
 ///
@@ -388,31 +466,29 @@ pub fn fft_frequencies<T: Float + NumOps>(sr: Option<usize>, n_fft: Option<usize
 /// # Examples
 ///
 /// ```
-/// use mel_filter::{mel, NormalizationFactor};
-/// let melfb = mel::<f64>(22050, 2048, None, None, None, false, NormalizationFactor::One);
-/// assert_eq!(melfb.len(), 128);
-/// assert_eq!(melfb[0].len(), 1025);
-/// assert_eq!(&melfb[0][..6], &[0f64, 0.016182853208219942, 0.032365706416439884, 0.028990088037379964, 0.012807234829160026, 0.][..], "begin six element");
-/// assert_eq!(&melfb[1][..9], &[0f64, 0., 0., 0.009779235793639925, 0.025962089001859864, 0.035393705451959974, 0.01921085224374004, 0.003027999035520103, 0.][..], "second nine element");
+/// use mel_filter::{mel, NormalizationFactor, FilterBankMat, FilterBank};
+/// let mut melfb = mel::<f64, FilterBankMat<f64>>(22050, 2048, None, None, None, false, NormalizationFactor::One);
+/// assert_eq!(melfb.shape(), &[128, 1025]);
+/// assert_eq!(&melfb.row_mut(0)[..6], &[0f64, 0.016182853208219942, 0.032365706416439884, 0.028990088037379964, 0.012807234829160026, 0.][..], "begin six element");
+/// assert_eq!(&melfb.row_mut(1)[..9], &[0f64, 0., 0., 0.009779235793639925, 0.025962089001859864, 0.035393705451959974, 0.01921085224374004, 0.003027999035520103, 0.][..], "second nine element");
 /// // melfb = [[ 0.   ,  0.016, ...,  0.   ,  0.   ],
 /// //          [ 0.   ,  0.   , ...,  0.   ,  0.   ],
 /// //          ...,
 /// //          [ 0.   ,  0.   , ...,  0.   ,  0.   ],
 /// //          [ 0.   ,  0.   , ...,  0.   ,  0.   ]]
 /// // Clip the maximum frequency to 8KHz
-/// let melfb = mel(22050, 2048, None, None, Some(8000.), false, NormalizationFactor::One);
-/// println!("{:?}", &melfb[0][..10]);
-/// assert_eq!(melfb.len(), 128);
-/// assert_eq!(melfb[0].len(), 1025);
-/// assert_eq!(&melfb[0][..6], &[0f64, 0.01969187633619885, 0.0393837526723977, 0.026457473399387796, 0.006765597063188946, 0.][..], "begin six element");
-/// assert_eq!(&melfb[1][..9], &[0f64, 0., 0., 0.016309077804604378, 0.036000954140803225, 0.029840271930982275, 0.010148395594783432, 0., 0.][..], "second nine element");
+/// let mut melfb: FilterBankMat<f64> = mel(22050, 2048, None, None, Some(8000.), false, NormalizationFactor::One);
+/// println!("{:?}", &melfb.row_mut(0)[..10]);
+/// assert_eq!(melfb.shape(), &[128, 1025]);
+/// assert_eq!(&melfb.row_mut(0)[..6], &[0f64, 0.01969187633619885, 0.0393837526723977, 0.026457473399387796, 0.006765597063188946, 0.][..], "begin six element");
+/// assert_eq!(&melfb.row_mut(1)[..9], &[0f64, 0., 0., 0.016309077804604378, 0.036000954140803225, 0.029840271930982275, 0.010148395594783432, 0., 0.][..], "second nine element");
 /// // melfb = [[ 0.  ,  0.02, ...,  0.  ,  0.  ],
 /// //          [ 0.  ,  0.  , ...,  0.  ,  0.  ],
 /// //          ...,
 /// //          [ 0.  ,  0.  , ...,  0.  ,  0.  ],
 /// //          [ 0.  ,  0.  , ...,  0.  ,  0.  ]])
 /// ```
-pub fn mel<T: Hz>(
+pub fn mel<T: Hz, Out: FilterBank<T>>(
     sr: usize,
     n_fft: usize,
     n_mels: Option<usize>,
@@ -420,7 +496,7 @@ pub fn mel<T: Hz>(
     fmax: Option<T>,
     htk: bool,
     norm: NormalizationFactor,
-) -> Vec<Vec<T>> {
+) -> Out {
     let fmax: T = fmax.unwrap_or_else(|| {
         let sr: f64 = sr.as_();
         T::from(sr / 2.).unwrap()
@@ -429,7 +505,7 @@ pub fn mel<T: Hz>(
     // Initialize the weights
     let n_mels = n_mels.unwrap_or(128);
     let width = 1 + n_fft / 2;
-    let mut weights = vec![vec![T::zero(); width]; n_mels];
+    let mut weights = Out::zeros(&[n_mels, width]);
 
     // Center freqs of each FFT bin
     let fftfreqs = fft_frequencies(Some(sr), Some(n_fft));
@@ -468,7 +544,7 @@ pub fn mel<T: Hz>(
                                                         // with `n_mels + 2` size
 
             // .. then intersect them with each other and zero
-            weights[i][j] = T::zero().max(lower.min(upper));
+            weights.row_mut(i)[j] = T::zero().max(lower.min(upper));
         }
     }
 
@@ -485,7 +561,7 @@ pub fn mel<T: Hz>(
                 .map(|(x, y)| two / (*x - *y))
                 .enumerate()
             {
-                let _: Vec<_> = weights[idx].iter_mut().map(|v| *v = (*v) * enorm).collect();
+                let _: Vec<_> = weights.row_mut(idx).iter_mut().map(|v| *v = (*v) * enorm).collect();
             }
             //let enorm = 2.0 / (mel_f[2..n_mels + 2] - mel_f[..n_mels]);
             // weights *= enorm[.., np.newaxis];
