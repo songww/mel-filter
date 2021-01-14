@@ -10,6 +10,81 @@ pub enum NormalizationFactor {
     Inf,
 }
 
+pub trait Hz: Float + NumCast {
+    /// # Examples
+    /// ```
+    /// use mel_filter::Hz;
+    /// assert_eq!(60.0f64.to_mel(false), 0.8999999999999999);
+    /// assert_eq!(0.0f64.to_mel(false), 0.);
+    /// assert_eq!(11025.0f64.to_mel(false), 49.91059448015905);
+    /// assert_eq!(110.0f64.to_mel(false), 1.65);
+    /// assert_eq!(220.0f64.to_mel(false), 3.3);
+    /// assert_eq!(440.0f64.to_mel(false), 6.6);
+    /// ```
+    fn to_mel(&self, htk: bool) -> Self {
+        if htk {
+            let n = Self::from(2595.0).unwrap();
+            return n * (*self / Self::from(700.0).unwrap() + Self::one()).log10()
+        }
+        // Fill in the linear part
+        let f_min = Self::zero();
+        let f_sp = Self::from(200.0 / 3.).unwrap();
+        let min_log_hz = Self::from(1000.0).unwrap(); // beginning of log region (Hz)
+        let min_log_mel = (min_log_hz - f_min) / f_sp; // same (Mels)
+        let logstep = Self::from((6.4).ln() / 27.0).unwrap(); // step size for log region
+        if self >= &min_log_hz {
+            min_log_mel + (*self / min_log_hz).ln() / logstep
+        } else {
+            (*self - f_min) / f_sp
+        }
+    }
+}
+
+impl Hz for f32 {}
+impl Hz for f64 {}
+
+pub trait Mel: Float + NumCast {
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use mel_filter::Mel;
+    /// assert_eq!(1.0f32.to_hz(false), 66.66666666666667);
+    /// assert_eq!(2.0f32.to_hz(false), 133.33333333333334);
+    /// assert_eq!(3.0f32.to_hz(false), 200.);
+    /// assert_eq!(4.0f32.to_hz(false), 266.66666666666667);
+    /// assert_eq!(5.0f32.to_hz(false), 333.3333);
+    /// ```
+    fn to_hz(&self, htk: bool) -> Self {
+        if htk {
+            let base: Self = Self::from(10.0).unwrap();
+            let seven_hundred: Self = Self::from(700.0).unwrap();
+            return seven_hundred
+                    * (base.powf(*self / Self::from(2595.0).unwrap()) - Self::one())
+        }
+
+        // Fill in the linear scale
+        let f_min = Self::zero();
+        let f_sp = Self::from(200.0 / 3.0).unwrap();
+
+        // And now the nonlinear scale
+        let min_log_hz = Self::from(1000.0).unwrap(); // beginning of log region (Hz)
+        let min_log_mel = (min_log_hz - f_min) / f_sp; // same (Mels)
+        let logstep = Self::from((6.4).ln() / 27.0).unwrap(); // step size for log region
+
+        // If we have vector data, vectorize
+        if self >= &min_log_mel {
+            // min_log_hz * np.exp(logstep * (mels[log_t] - min_log_mel))
+            min_log_hz * Self::exp(logstep * (*self - min_log_mel))
+        } else {
+            f_min + f_sp * *self
+        }
+    }
+}
+
+impl Mel for f32 {}
+impl Mel for f64 {}
+
 /// Implementation of `librosa.hz_to_mel`
 ///
 /// Convert Hz to Mels
@@ -176,7 +251,7 @@ where
 /// linear below 1 kHz and logarithmic above 1 kHz. Another available implementation
 /// replicates the Hidden Markov Toolkit [#]_ (HTK) according to the following formula::
 ///
-///     mel = 2595.0 * (1.0 + f / 700.0).log10().
+/// >>    mel = 2595.0 * (1.0 + f / 700.0).log10().
 ///
 /// The choice of implementation is determined by the `htk` keyword argument: setting
 /// `htk=false` leads to the Auditory toolbox implementation, whereas setting it `htk=true`
@@ -243,7 +318,7 @@ where
 /// assert_eq!(freqs, expected);
 /// ```
 ///
-pub fn mel_frequencies<T: Float + NumOps>(
+pub fn mel_frequencies<T: Hz>(
     n_mels: Option<usize>,
     fmin: Option<T>,
     fmax: Option<T>,
@@ -256,8 +331,8 @@ pub fn mel_frequencies<T: Float + NumOps>(
     let fmax = fmax.unwrap_or_else(|| NumCast::from(11025.0).unwrap());
 
     // 'Center freqs' of mel bands - uniformly spaced between limits
-    let min_mel = hz_to_mel(&[fmin], htk)[0];
-    let max_mel = hz_to_mel(&[fmax], htk)[0];
+    let min_mel = fmin.to_mel(htk);
+    let max_mel = fmax.to_mel(htk);
 
     let mels: Vec<_> = linspace::<T>(min_mel, max_mel, n_mels).collect();
 
@@ -337,7 +412,7 @@ pub fn fft_frequencies<T: Float + NumOps>(sr: Option<usize>, n_fft: Option<usize
 /// //          [ 0.  ,  0.  , ...,  0.  ,  0.  ],
 /// //          [ 0.  ,  0.  , ...,  0.  ,  0.  ]])
 /// ```
-pub fn mel<T: Float + NumOps>(
+pub fn mel<T: Hz>(
     sr: usize,
     n_fft: usize,
     n_mels: Option<usize>,
