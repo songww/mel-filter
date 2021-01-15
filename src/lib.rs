@@ -168,7 +168,7 @@ mod torch_integ {
     use tch::kind::Kind;
     use tch::IndexOp;
     use tch::Tensor;
-    trait ToKind {
+    pub trait ToKind {
         fn to_kind() -> Kind;
     }
     impl ToKind for f32 {
@@ -206,7 +206,7 @@ mod torch_integ {
 }
 
 #[cfg(feature = "torch")]
-use torch_integ::*;
+pub use torch_integ::*;
 
 /// Implementation of `librosa.hz_to_mel`
 ///
