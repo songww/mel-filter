@@ -17,6 +17,8 @@ categories = ["multimedia::audio", "science"]
 num-traits = "0.2"
 itertools-num = "0.1"
 ndarray = { version = "0.14", optional = true }
+tch = { version = "0.3", optional = true }
 
 [features]
 default = []
+torch = [ "tch" ]

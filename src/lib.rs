@@ -24,7 +24,7 @@ pub trait Hz: Float + NumCast {
     fn to_mel(&self, htk: bool) -> Self {
         if htk {
             let n = Self::from(2595.0).unwrap();
-            return n * (*self / Self::from(700.0).unwrap() + Self::one()).log10()
+            return n * (*self / Self::from(700.0).unwrap() + Self::one()).log10();
         }
         // Fill in the linear part
         let f_min = Self::zero();
@@ -59,8 +59,7 @@ pub trait Mel: Float + NumCast + Zero + Clone {
         if htk {
             let base: Self = Self::from(10.0).unwrap();
             let seven_hundred: Self = Self::from(700.0).unwrap();
-            return seven_hundred
-                    * (base.powf(*self / Self::from(2595.0).unwrap()) - Self::one())
+            return seven_hundred * (base.powf(*self / Self::from(2595.0).unwrap()) - Self::one());
         }
 
         // Fill in the linear scale
@@ -94,30 +93,30 @@ pub trait FilterBank<Mel> {
 }
 
 #[cfg(feature = "ndarray")]
-use ndarray::prelude::*;
+use ndarray::{prelude::*, Array2};
 #[cfg(feature = "ndarray")]
-impl<Mel> FilterBank<Mel> for Array2<Mel> {
+impl<F: Mel + Zero> FilterBank<F> for Array2<F> {
     #[inline]
-    fn as_slice(&self) -> &[Mel] {
+    fn as_slice(&self) -> &[F] {
         self.as_slice().unwrap()
     }
     #[inline]
-    fn as_mut_slice(&mut self) -> &mut [Mel] {
-        self.as_mut_slice().unwrap()
+    fn as_mut_slice(&mut self) -> &mut [F] {
+        Array2::<F>::as_slice_memory_order_mut(self).unwrap()
     }
     #[inline]
     fn shape(&self) -> &[usize] {
-        self.shape()
+        self.shape().as_ref()
     }
 
     #[inline]
     fn zeros(shape: &[usize; 2]) -> Self {
-        Self::zeros(shape)
+        Self::zeros(shape.to_owned())
     }
 
     #[inline]
-    fn row_mut(&mut self, idx: usize) -> &mut [Mel]{
-        Arrray2::<Mel>::row_mut(self, idx).as_mut_slice().unwrap()
+    fn row_mut(&mut self, idx: usize) -> &mut [F] {
+        Array2::<F>::row_mut(self, idx).into_slice().unwrap()
     }
 }
 
@@ -158,10 +157,56 @@ impl<Mel: Clone + Zero> FilterBank<Mel> for FilterBankMat<Mel> {
             data: vec![Mel::zero(); rows * cols],
             rows,
             cols,
-            shape_: [rows, cols]
+            shape_: [rows, cols],
         }
     }
 }
+
+#[cfg(feature = "torch")]
+mod torch_integ {
+    use super::*;
+    use tch::kind::Kind;
+    use tch::IndexOp;
+    use tch::Tensor;
+    trait ToKind {
+        fn to_kind() -> Kind;
+    }
+    impl ToKind for f32 {
+        fn to_kind() -> Kind {
+            Kind::Float
+        }
+    }
+    impl ToKind for f64 {
+        fn to_kind() -> Kind {
+            Kind::Double
+        }
+    }
+    impl<M: Mel + ToKind> FilterBank<M> for Tensor {
+        fn as_slice(&self) -> &[M] {
+            let size = self.size().iter().fold(1, |x, y| x * y);
+            unsafe { std::slice::from_raw_parts(self.data_ptr() as *const M, size as usize) }
+        }
+        fn as_mut_slice(&mut self) -> &mut [M] {
+            let size = self.size().iter().fold(1, |x, y| x * y);
+            unsafe { std::slice::from_raw_parts_mut(self.data_ptr() as *mut M, size as usize) }
+        }
+        fn shape(&self) -> &[usize] {
+            unimplemented!()
+        }
+        fn zeros(shape: &[usize; 2]) -> Self {
+            let shape = [shape[0] as i64, shape[1] as i64];
+            Tensor::zeros(shape.as_ref(), (M::to_kind(), tch::Device::Cpu))
+        }
+        fn row_mut(&mut self, idx: usize) -> &mut [M] {
+            let mut row = self.i(&[idx as i64][..]);
+            let size = row.size().iter().fold(1, |x, y| x * y);
+            unsafe { std::slice::from_raw_parts_mut(row.data_ptr() as *mut M, size as usize) }
+        }
+    }
+}
+
+#[cfg(feature = "torch")]
+use torch_integ::*;
 
 /// Implementation of `librosa.hz_to_mel`
 ///
@@ -561,7 +606,11 @@ pub fn mel<T: Hz, Out: FilterBank<T>>(
                 .map(|(x, y)| two / (*x - *y))
                 .enumerate()
             {
-                let _: Vec<_> = weights.row_mut(idx).iter_mut().map(|v| *v = (*v) * enorm).collect();
+                let _: Vec<_> = weights
+                    .row_mut(idx)
+                    .iter_mut()
+                    .map(|v| *v = (*v) * enorm)
+                    .collect();
             }
             //let enorm = 2.0 / (mel_f[2..n_mels + 2] - mel_f[..n_mels]);
             // weights *= enorm[.., np.newaxis];
