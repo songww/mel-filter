@@ -198,7 +198,7 @@ mod torch_integ {
             Tensor::zeros(shape.as_ref(), (M::to_kind(), tch::Device::Cpu))
         }
         fn row_mut(&mut self, idx: usize) -> &mut [M] {
-            let mut row = self.i(&[idx as i64][..]);
+            let row = self.i(&[idx as i64][..]);
             let size = row.size().iter().fold(1, |x, y| x * y);
             unsafe { std::slice::from_raw_parts_mut(row.data_ptr() as *mut M, size as usize) }
         }
@@ -532,6 +532,10 @@ pub fn fft_frequencies<T: Float + NumOps>(sr: Option<usize>, n_fft: Option<usize
 /// //          ...,
 /// //          [ 0.  ,  0.  , ...,  0.  ,  0.  ],
 /// //          [ 0.  ,  0.  , ...,  0.  ,  0.  ]])
+/// let mut melfb: FilterBankMat<f64> = mel(16000, 2048, Some(229), Some(30.), Some(8000.), true, NormalizationFactor::One);
+/// println!("{:?}", &melfb.row_mut(228)[990..]);
+/// assert_eq!(&melfb.row_mut(228)[990..], &[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0006753052731748324, 0.0015887453035355076, 0.0025021853338961834, 0.0034156253642568584, 0.004329065394617534, 0.005242505424978209, 0.006155945455338884, 0.00706938548569956, 0.007982825516060235, 0.00889626554642091, 0.009809705576781584, 0.010723145607142262, 0.009940165390349252, 0.009036513991226612, 0.008132862592103973, 0.0072292111929813324, 0.006325559793858692, 0.0054219083947360525, 0.004518256995613412, 0.0036146055964907716, 0.0027109541973681307, 0.001807302798245491, 0.0009036513991228507, 0.00000000000000021039773689644416]);
+/// assert_eq!(melfb.shape(), &[229, 1025]);
 /// ```
 pub fn mel<T: Hz, Out: FilterBank<T>>(
     sr: usize,
